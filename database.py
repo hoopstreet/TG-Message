@@ -11,10 +11,10 @@ def add_to_queue(username):
         supabase.table('queue').insert({'username': username, 'status': 'pending'}).execute()
 
 def get_accounts():
-    return supabase.table('accounts').select('*').eq('is_active', True).execute().data
+    return supabase.table('accounts').select('*').execute().data
 
-def save_account(phone, session_str):
-    supabase.table('accounts').upsert({'phone': phone, 'session_string': session_str, 'is_active': True}).execute()
+def save_account(phone_val, session_str):
+    supabase.table('accounts').upsert({'session_string': session_str, 'is_active': True}).execute()
 
 def get_next_target():
     res = supabase.table('queue').select('*').eq('status', 'pending').order('id').limit(1).execute()
@@ -24,7 +24,6 @@ def update_queue(id, status):
     supabase.table('queue').update({'status': status}).eq('id', id).execute()
 
 def set_setting(key, value):
-    # The fix: Explicitly handle the conflict on the 'key' column
     supabase.table('settings').upsert({'key': key, 'value': str(value)}, on_conflict='key').execute()
 
 def get_setting(key):
