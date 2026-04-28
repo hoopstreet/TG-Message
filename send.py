@@ -1,41 +1,62 @@
-from telethon.sync import TelegramClient
+import asyncio
+import random
+import logging
+from telethon import TelegramClient
+from telethon.tl.functions.contacts import AddContactRequest
+import database  # Import our Supabase helper
 
-# Function to login to Telegram
-def login(api_id, api_hash, phone_number):
-    client = TelegramClient('session_name', api_id, api_hash)
-    client.connect()
-    if not client.is_user_authorized():
-        client.send_code_request(phone_number)
-        client.sign_in(phone_number, input('Enter the code: '))
-    return client
+# YOUR CREDENTIALS
+API_ID = 39849897
+API_HASH = '21eb2d7f293519cc5eb575c9639e1423'
 
-# Function to send message to list of usernames
-def send_message(client, username_file, message):
-    with open(username_file, 'r') as file:
-        usernames = file.readlines()
-        for username in usernames:
+# Initialize Client
+client = TelegramClient('hoopstreet_session', API_ID, API_HASH)
+
+async def main():
+    await client.start()
+    print("Hoopstreet System Online. Checking Supabase for pending users...")
+
+    while True:
+        # 1. Fetch users from Supabase
+        pending_users = database.get_pending_users()
+        
+        if not pending_users:
+            print("No pending users found. Sleeping for 10 minutes...")
+            await asyncio.sleep(600)
+            continue
+
+        for record in pending_users:
+            username = record['username']
+            row_id = record['id']
+            
             try:
-                client.send_message(username.strip(), message)
-                print(f"Message sent to {username.strip()} successfully!")
+                print(f"Targeting: {username}")
+                
+                # Safety Step: Add Contact
+                await client(AddContactRequest(
+                    id=username, 
+                    first_name="Hoopstreet", 
+                    last_name="", 
+                    phone="", 
+                    add_phone_privacy_exception=False
+                ))
+                
+                # Send Message
+                await client.send_message(username, "Hello! Your custom message here.")
+                
+                # Update Supabase to 'sent'
+                database.update_status(row_id, 'sent')
+                print(f"Success! Updated {username} status to sent.")
+                
+                # Anti-Ban Delay (3-7 minutes for better safety)
+                wait = random.randint(180, 420)
+                print(f"Waiting {wait} seconds...")
+                await asyncio.sleep(wait)
+                
             except Exception as e:
-                print(f"Failed to send message to {username.strip()}: {e}")
-
-# Main function
-def main():
-    # Input your Telegram API credentials
-    api_id = 'your_api_id'
-    api_hash = 'your_api_hash'
-    phone_number = 'your_phone_number'
-
-    # Login to Telegram
-    client = login(api_id, api_hash, phone_number)
-
-    # Send message
-    username_file = 'usernames.txt'  # Name of the text file containing usernames
-    message = 'Your message here'  # Message to be sent
-    send_message(client, username_file, message)
+                print(f"Error with {username}: {e}")
+                database.update_status(row_id, 'failed')
+                await asyncio.sleep(60)
 
 if __name__ == '__main__':
-    main()
-
-//tool made by codeprofessor 
+    asyncio.run(main())
