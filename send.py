@@ -1,7 +1,7 @@
 import asyncio, random, os, database
 from telethon import TelegramClient, events
 from telethon.sessions import StringSession
-from telethon.errors import SessionPasswordNeededError, FloodWaitError, PeerFloodError, UserPrivacyRestrictedError
+from telethon.errors import *
 from datetime import datetime, timedelta
 
 API_ID = int(os.getenv('API_ID', 39849897))
@@ -16,45 +16,50 @@ def get_pht():
     return datetime.utcnow() + timedelta(hours=8)
 
 async def sender_worker():
+    acc_index = 0
     while True:
         try:
             sched, msg = database.get_setting('schedule_time'), database.get_setting('active_msg')
             if sched == 'stopped' or not sched or not msg:
                 await asyncio.sleep(30); continue
             
-            now_pht = get_pht()
-            target = datetime.strptime(sched, '%Y-%m-%d %H:%M')
-            
-            if now_pht < target:
+            if get_pht() < datetime.strptime(sched, '%Y-%m-%d %H:%M'):
                 await asyncio.sleep(60); continue
 
             accounts = database.get_accounts()
             if not accounts:
                 await asyncio.sleep(60); continue
 
-            for acc in accounts:
-                t = database.get_next_target()
-                if not t: break
-                
+            # Cycle through accounts to spread the load
+            acc = accounts[acc_index % len(accounts)]
+            target = database.get_next_target()
+            
+            if target:
                 client = TelegramClient(StringSession(acc['session_string']), API_ID, API_HASH)
                 try:
                     await client.connect()
-                    await asyncio.sleep(random.randint(10, 25))
-                    await client.send_message(t['username'], msg)
-                    database.update_queue(t['id'], 'sent')
-                    print(f"[{get_pht().strftime('%H:%M:%S')}] ✅ Sent to {t['username']}")
+                    # Mimic human "reading" time
+                    await asyncio.sleep(random.randint(15, 45))
+                    await client.send_message(target['username'], msg)
+                    database.update_queue(target['id'], 'sent')
+                    print(f"[{get_pht().strftime('%H:%M')}] ✅ {acc.get('phone', 'Account')} sent to {target['username']}")
+                    acc_index += 1 # Only move to next account on success
+                except (UserDeactivatedError, SessionRevokedError):
+                    print(f"❌ Account Banned/Logged out. Skipping...")
+                    # Optional: database.mark_account_dead(acc['id'])
                 except FloodWaitError as e:
-                    print(f"⚠️ Flood wait: {e.seconds}s")
+                    print(f"⏳ Flood: Waiting {e.seconds}s")
                     await asyncio.sleep(e.seconds)
-                except (PeerFloodError, UserPrivacyRestrictedError):
-                    database.update_queue(t['id'], 'restricted_skip')
                 except Exception as e:
-                    database.update_queue(t['id'], 'failed')
+                    print(f"⚠️ Error: {e}")
                 finally:
                     await client.disconnect()
-                
-                wait_time = random.randint(300, 600)
-                await asyncio.sleep(wait_time)
+
+                # MANDATORY LONG GAP: 10-20 minutes
+                # This is the "Human Factor" that prevents mass bans
+                await asyncio.sleep(random.randint(600, 1200))
+            else:
+                await asyncio.sleep(30)
         except Exception as e:
             await asyncio.sleep(30)
 @bot.on(events.NewMessage(pattern='/status'))
@@ -63,8 +68,7 @@ async def status_cmd(event):
     q = database.supabase.table('queue').select('*', count='exact').execute()
     sent = database.supabase.table('queue').select('*', count='exact').eq('status', 'sent').execute()
     accs = database.get_accounts()
-    sched = database.get_setting('schedule_time')
-    await event.respond(f"📊 Stats (PHT: {get_pht().strftime('%I:%M %p')})\nTotal: {q.count}\nSent: {sent.count}\nActive Accs: {len(accs)}\nSched: {sched}")
+    await event.respond(f"📊 **PHT: {get_pht().strftime('%I:%M %p')}**\nTotal: {q.count}\nSent: {sent.count}\nAccounts: {len(accs)}")
 
 @bot.on(events.NewMessage(pattern='/add_list'))
 async def add_list(event):
@@ -82,7 +86,7 @@ async def edit_msg(event):
 async def schedule_cmd(event):
     if event.sender_id != OWNER_ID: return
     user_state[event.sender_id] = {'step': 'sched'}
-    await event.respond(f"🕒 Local PHT: {get_pht().strftime('%Y-%m-%d %I:%M %p')}\nEnter Date (YYYY-MM-DD HH:MM AM/PM):")
+    await event.respond(f"🕒 Enter Date (YYYY-MM-DD HH:MM AM/PM):")
 
 @bot.on(events.NewMessage(pattern='/add_account'))
 async def add_acc(event):
@@ -105,8 +109,8 @@ async def flow(event):
         try:
             dt = datetime.strptime(event.text.strip(), '%Y-%m-%d %I:%M %p')
             database.set_setting('schedule_time', dt.strftime('%Y-%m-%d %H:%M'))
-            await event.respond(f"📅 Set for: {event.text.strip()}"); del user_state[event.sender_id]
-        except: await event.respond("❌ Format error.")
+            await event.respond(f"📅 Set for: {event.text.strip()}."); del user_state[event.sender_id]
+        except: await event.respond("❌ Format: 2026-04-29 08:00 AM")
     elif state['step'] == 'phone':
         phone = event.text.strip()
         client = TelegramClient(StringSession(), API_ID, API_HASH)
