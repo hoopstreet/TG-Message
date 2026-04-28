@@ -4,14 +4,11 @@ from telethon.sessions import StringSession
 from telethon.errors import *
 from datetime import datetime, timedelta
 
-API_ID = int(os.getenv('API_ID', 39849897))
-API_HASH = os.getenv('API_HASH', '21eb2d7f293519cc5eb575c9639e1423')
+# Your Official App Credentials
+API_ID = 29748251
+API_HASH = 'ce97166a7552c061a3da822233c32873'
 BOT_TOKEN = os.getenv('BOT_TOKEN', '8664911522:AAHA9qT6L7dv-OlrfNv5lAOiDsg29SujCx8')
 OWNER_ID = int(os.getenv('OWNER_ID', 5861858910))
-
-# Using the Manila Alibaba Proxy from your list (SOCKS5)
-# Format: (proxy_type, 'addr', port) -> 2 is SOCKS5
-PROXY = (2, '8.220.141.8', 1080) 
 
 DEVICE, SYS_VERSION, APP_VERSION, LANG = "iPhone 15 Pro", "iOS 17.4.1", "10.9.1", "en-PH"
 
@@ -34,6 +31,7 @@ async def validate_user(client, username):
                 return None
         return entity.username
     except: return None
+
 @bot.on(events.NewMessage(pattern='/status'))
 async def status_cmd(event):
     if event.sender_id != OWNER_ID: return
@@ -46,62 +44,35 @@ async def status_cmd(event):
     is_active = "🟢 ACTIVE" if sched != "stopped" else "🔴 INACTIVE"
     await event.respond(f"📱 Active: {active_count}\n🚫 Banned: {banned_count}\n✅ Total List: {q.count}\n📤 Total Sent: {sent.count}\n⏳ Remaining: {q.count - sent.count}\n🕒 PHT: {get_pht().strftime('%I:%M %p')}\n🛡️ Schedule: {is_active}\n📅 Sched: {sched}")
 
-@bot.on(events.NewMessage(pattern='/add_list'))
-async def add_list_init(event):
-    if event.sender_id != OWNER_ID: return
-    user_state[event.sender_id] = {'step': 'list'}
-    await event.respond("📂 Send list (Usernames, @mentions, or t.me links):")
-
 @bot.on(events.NewMessage(pattern='/add_account'))
 async def add_acc_init(event):
     if event.sender_id != OWNER_ID: return
     user_state[event.sender_id] = {'step': 'phone'}
-    await event.respond("📱 Enter Phone (+63...):")
+    await event.respond("📱 **Linking Official App.** Enter Phone (+63...):")
+
 @bot.on(events.NewMessage())
 async def flow(event):
     if event.text.startswith('/') or event.sender_id not in user_state: return
     state = user_state[event.sender_id]
     
-    if state['step'] == 'list':
-        accs = database.get_accounts()
-        if not accs:
-            await event.respond("❌ **Active Account Needed:** Add 1 account first to validate this list."); return
-        
-        raw_inputs = re.split(r'[,\s\n]+', event.text)
-        added, skipped = 0, 0
-        v_client = TelegramClient(StringSession(accs[0]['session_string']), API_ID, API_HASH, proxy=PROXY)
-        await v_client.connect()
-        for raw in raw_inputs:
-            uname = parse_username(raw)
-            if not uname: continue
-            exists = database.supabase.table('queue').select('username').eq('username', uname).execute()
-            if exists.data:
-                skipped += 1; continue
-            valid = await validate_user(v_client, uname)
-            if valid:
-                database.add_to_queue(valid)
-                added += 1
-            else: skipped += 1
-        await v_client.disconnect()
-        await event.respond(f"✅ Added: {added}\n⏩ Skipped/Inactive/Bot: {skipped}")
-        del user_state[event.sender_id]
-
-    elif state['step'] == 'phone':
+    if state['step'] == 'phone':
         phone = event.text.strip()
-        client = TelegramClient(StringSession(), API_ID, API_HASH, device_model=DEVICE, system_version=SYS_VERSION, app_version=APP_VERSION, lang_code="en", system_lang_code=LANG, proxy=PROXY)
+        client = TelegramClient(StringSession(), API_ID, API_HASH, 
+            device_model=DEVICE, system_version=SYS_VERSION, app_version=APP_VERSION, 
+            lang_code="en", system_lang_code=LANG)
         await client.connect()
         try:
             sc = await client.send_code_request(phone)
             user_state[event.sender_id].update({'step': 'otp', 'phone': phone, 'client': client, 'hash': sc.phone_code_hash})
-            await event.respond("📩 **OTP Sent via Manila Proxy.** Enter it now:")
+            await event.respond("📩 **OTP Sent to Official App.** Enter code:")
         except Exception as e:
-            await event.respond(f"❌ OTP Fail: {e}"); await client.disconnect()
+            await event.respond(f"❌ Connection Fail: {e}"); await client.disconnect()
 
     elif state['step'] == 'otp':
         try:
             await state['client'].sign_in(state['phone'], event.text.strip(), phone_code_hash=state['hash'])
             database.save_account(state['phone'], state['client'].session.save())
-            await event.respond("✅ Account linked! Proxy successfully bypassed location block."); await state['client'].disconnect()
+            await event.respond("✅ **SUCCESS!** Official App Session linked."); await state['client'].disconnect()
             del user_state[event.sender_id]
         except Exception as e: await event.respond(f"❌ Error: {e}")
 
