@@ -55,3 +55,39 @@ async def flow(event):
 if __name__ == '__main__':
     print("Commander Bot is starting...")
     bot.run_until_disconnected()
+
+async def sender_worker():
+    while True:
+        try:
+            sched = database.get_setting('schedule_time')
+            msg = database.get_setting('active_msg')
+            if sched == 'stopped' or not sched or not msg:
+                await asyncio.sleep(30); continue
+            
+            now_pht = datetime.utcnow() + timedelta(hours=8)
+            target_time = datetime.strptime(sched, '%Y-%m-%d %H:%M')
+            
+            if now_pht < target_time:
+                await asyncio.sleep(60); continue
+
+            accounts = database.get_accounts()
+            for acc in accounts:
+                target = database.get_next_target()
+                if not target or database.get_setting('schedule_time') == 'stopped': break
+                
+                client = TelegramClient(StringSession(acc['session_string']), API_ID, API_HASH)
+                await client.connect()
+                await client.send_message(target['username'], msg)
+                database.update_queue(target['id'], 'sent')
+                await client.disconnect()
+                await asyncio.sleep(random.randint(300, 600))
+        except Exception as e:
+            print(f"Worker Error: {e}")
+            await asyncio.sleep(30)
+
+# Update the start logic
+if __name__ == '__main__':
+    loop = asyncio.get_event_loop()
+    loop.create_task(sender_worker())
+    print("Commander Bot + Worker is starting...")
+    bot.run_until_disconnected()
