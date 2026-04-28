@@ -1,12 +1,8 @@
-import asyncio
-import random
-import os
+import asyncio, random, os, database
 from telethon import TelegramClient, events
 from telethon.sessions import StringSession
-from telethon.tl.functions.contacts import AddContactRequest
-from telethon.tl.types import UserStatusOffline
+from telethon.errors import SessionPasswordNeededError
 from datetime import datetime, timedelta
-import database
 
 API_ID = int(os.getenv('API_ID', 39849897))
 API_HASH = os.getenv('API_HASH', '21eb2d7f293519cc5eb575c9639e1423')
@@ -15,6 +11,23 @@ OWNER_ID = int(os.getenv('OWNER_ID', 5861858910))
 
 bot = TelegramClient('bot_commander', API_ID, API_HASH).start(bot_token=BOT_TOKEN)
 user_state = {}
+@bot.on(events.NewMessage(pattern='/status'))
+async def status_cmd(event):
+    if event.sender_id != OWNER_ID: return
+    q = database.supabase.table('queue').select('*', count='exact').execute()
+    pending = database.supabase.table('queue').select('*', count='exact').eq('status', 'pending').execute()
+    sent_today = database.supabase.table('queue').select('*', count='exact').eq('status', 'sent').execute()
+    accs = database.get_accounts()
+    sched = database.get_setting('schedule_time')
+    
+    msg = f"📊 **Global Audit & Stats**\n\n"
+    msg += f"👥 Total Usernames: {q.count}\n"
+    msg += f"⏳ Pending: {pending.count}\n"
+    msg += f"✅ Sent (Total): {sent_today.count}\n"
+    msg += f"📱 Active Senders: {len(accs)}\n"
+    msg += f"📅 Schedule: {sched if sched != 'stopped' else 'None'}\n"
+    await event.respond(msg)
+
 @bot.on(events.NewMessage(pattern='/add_list'))
 async def add_list(event):
     if event.sender_id != OWNER_ID: return
@@ -37,7 +50,7 @@ async def schedule_cmd(event):
     if event.sender_id != OWNER_ID: return
     database.set_setting('schedule_time', 'stopped')
     user_state[event.sender_id] = {'step': 'sched'}
-    await event.respond("📅 Enter: YYYY-MM-DD hh:mm AM/PM")
+    await event.respond("🕒 Previous schedule stopped.\nEnter New Date (YYYY-MM-DD HH:MM):")
 
 @bot.on(events.NewMessage(pattern='/add_account'))
 async def add_acc(event):
@@ -48,6 +61,7 @@ async def add_acc(event):
 async def flow(event):
     if event.text.startswith('/') or event.sender_id not in user_state: return
     state = user_state[event.sender_id]
+    
     if state['step'] == 'sched':
         try:
             dt = datetime.strptime(event.text.strip(), '%Y-%m-%d %I:%M %p')
@@ -55,6 +69,7 @@ async def flow(event):
             await event.respond(f"📅 Set for: {event.text.strip()}")
             del user_state[event.sender_id]
         except: await event.respond("❌ Use: YYYY-MM-DD 08:00 AM")
+        
     elif state['step'] == 'phone':
         phone = event.text.strip()
         client = TelegramClient(StringSession(), API_ID, API_HASH)
@@ -62,12 +77,23 @@ async def flow(event):
         sc = await client.send_code_request(phone)
         user_state[event.sender_id].update({'step': 'otp', 'phone': phone, 'client': client, 'hash': sc.phone_code_hash})
         await event.respond("📩 Enter OTP:")
+        
     elif state['step'] == 'otp':
         try:
             await state['client'].sign_in(state['phone'], event.text.strip(), phone_code_hash=state['hash'])
             database.save_account(state['phone'], state['client'].session.save())
             await event.respond("✅ Account linked!"); del user_state[event.sender_id]
+        except SessionPasswordNeededError:
+            user_state[event.sender_id]['step'] = '2fa'
+            await event.respond("🔐 2FA Enabled. Please enter your Cloud Password:")
         except Exception as e: await event.respond(f"❌ Error: {e}")
+        
+    elif state['step'] == '2fa':
+        try:
+            await state['client'].sign_in(password=event.text.strip())
+            database.save_account(state['phone'], state['client'].session.save())
+            await event.respond("✅ Account linked (2FA Bypass)!"); del user_state[event.sender_id]
+        except Exception as e: await event.respond(f"❌ Wrong Password: {e}")
 async def sender_worker():
     while True:
         try:
