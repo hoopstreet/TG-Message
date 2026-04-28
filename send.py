@@ -9,13 +9,13 @@ API_HASH = os.getenv('API_HASH', '21eb2d7f293519cc5eb575c9639e1423')
 BOT_TOKEN = os.getenv('BOT_TOKEN', '8664911522:AAHA9qT6L7dv-OlrfNv5lAOiDsg29SujCx8')
 OWNER_ID = int(os.getenv('OWNER_ID', 5861858910))
 
-# Optional: Add PH Proxy here if location blocks continue
-# Format: (proxy_type, 'addr', port) -> proxy_type 2 is SOCKS5
-PROXY = None 
+# Using the Manila Alibaba Proxy from your list (SOCKS5)
+# Format: (proxy_type, 'addr', port) -> 2 is SOCKS5
+PROXY = (2, '8.220.141.8', 1080) 
 
 DEVICE, SYS_VERSION, APP_VERSION, LANG = "iPhone 15 Pro", "iOS 17.4.1", "10.9.1", "en-PH"
 
-bot = TelegramClient('bot_commander', API_ID, API_HASH, proxy=PROXY).start(bot_token=BOT_TOKEN)
+bot = TelegramClient('bot_commander', API_ID, API_HASH).start(bot_token=BOT_TOKEN)
 user_state = {}
 
 def get_pht():
@@ -93,7 +93,7 @@ async def flow(event):
         try:
             sc = await client.send_code_request(phone)
             user_state[event.sender_id].update({'step': 'otp', 'phone': phone, 'client': client, 'hash': sc.phone_code_hash})
-            await event.respond("📩 **OTP Sent.** Enter it now:")
+            await event.respond("📩 **OTP Sent via Manila Proxy.** Enter it now:")
         except Exception as e:
             await event.respond(f"❌ OTP Fail: {e}"); await client.disconnect()
 
@@ -101,7 +101,7 @@ async def flow(event):
         try:
             await state['client'].sign_in(state['phone'], event.text.strip(), phone_code_hash=state['hash'])
             database.save_account(state['phone'], state['client'].session.save())
-            await event.respond("✅ Account linked successfully!"); await state['client'].disconnect()
+            await event.respond("✅ Account linked! Proxy successfully bypassed location block."); await state['client'].disconnect()
             del user_state[event.sender_id]
         except Exception as e: await event.respond(f"❌ Error: {e}")
 
