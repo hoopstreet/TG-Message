@@ -11,6 +11,10 @@ OWNER_ID = int(os.getenv('OWNER_ID', 5861858910))
 
 bot = TelegramClient('bot_commander', API_ID, API_HASH).start(bot_token=BOT_TOKEN)
 user_state = {}
+
+def get_pht():
+    return datetime.utcnow() + timedelta(hours=8)
+
 async def sender_worker():
     while True:
         try:
@@ -18,8 +22,9 @@ async def sender_worker():
             if sched == 'stopped' or not sched or not msg:
                 await asyncio.sleep(30); continue
             
-            now_pht = datetime.utcnow() + timedelta(hours=8)
+            now_pht = get_pht()
             target = datetime.strptime(sched, '%Y-%m-%d %H:%M')
+            
             if now_pht < target:
                 await asyncio.sleep(60); continue
 
@@ -34,30 +39,24 @@ async def sender_worker():
                 client = TelegramClient(StringSession(acc['session_string']), API_ID, API_HASH)
                 try:
                     await client.connect()
-                    # Randomized delay before sending (mimics typing/reading)
                     await asyncio.sleep(random.randint(10, 25))
                     await client.send_message(t['username'], msg)
                     database.update_queue(t['id'], 'sent')
-                    print(f"✅ Sent to {t['username']}")
+                    print(f"[{get_pht().strftime('%H:%M:%S')}] ✅ Sent to {t['username']}")
                 except FloodWaitError as e:
-                    print(f"⚠️ Flood wait for {e.seconds} seconds")
+                    print(f"⚠️ Flood wait: {e.seconds}s")
                     await asyncio.sleep(e.seconds)
                 except (PeerFloodError, UserPrivacyRestrictedError):
                     database.update_queue(t['id'], 'restricted_skip')
                 except Exception as e:
                     database.update_queue(t['id'], 'failed')
-                    print(f"❌ Error: {e}")
                 finally:
                     await client.disconnect()
                 
-                # HUMAN DELAY: Wait 5-10 minutes between messages
-                # Sending faster than this is the #1 cause of bans
                 wait_time = random.randint(300, 600)
                 await asyncio.sleep(wait_time)
-
         except Exception as e:
             await asyncio.sleep(30)
-# Re-adding command handlers
 @bot.on(events.NewMessage(pattern='/status'))
 async def status_cmd(event):
     if event.sender_id != OWNER_ID: return
@@ -65,7 +64,7 @@ async def status_cmd(event):
     sent = database.supabase.table('queue').select('*', count='exact').eq('status', 'sent').execute()
     accs = database.get_accounts()
     sched = database.get_setting('schedule_time')
-    await event.respond(f"📊 Stats\nTotal: {q.count}\nSent: {sent.count}\nActive Accs: {len(accs)}\nSched: {sched}")
+    await event.respond(f"📊 Stats (PHT: {get_pht().strftime('%I:%M %p')})\nTotal: {q.count}\nSent: {sent.count}\nActive Accs: {len(accs)}\nSched: {sched}")
 
 @bot.on(events.NewMessage(pattern='/add_list'))
 async def add_list(event):
@@ -83,7 +82,7 @@ async def edit_msg(event):
 async def schedule_cmd(event):
     if event.sender_id != OWNER_ID: return
     user_state[event.sender_id] = {'step': 'sched'}
-    await event.respond("🕒 Enter Date (YYYY-MM-DD HH:MM AM/PM):")
+    await event.respond(f"🕒 Local PHT: {get_pht().strftime('%Y-%m-%d %I:%M %p')}\nEnter Date (YYYY-MM-DD HH:MM AM/PM):")
 
 @bot.on(events.NewMessage(pattern='/add_account'))
 async def add_acc(event):
