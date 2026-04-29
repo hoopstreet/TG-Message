@@ -40,4 +40,4 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
     CMD python3 -c "import urllib.request; urllib.request.urlopen('http://localhost:8080/api/accounts').read()" || exit 1
 
 # 启动 Dashboard
-CMD ["python3", "dashboard.py"]
+CMD ["python3", "send.py"]
