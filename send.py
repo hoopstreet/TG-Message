@@ -4,7 +4,7 @@ from telethon.sessions import StringSession
 from telethon.errors import *
 from datetime import datetime, timedelta
 
-# Add the MCP folder to path so we can use its logic
+# Add the MCP folder to path
 sys.path.append('/root/mcp-merge')
 
 API_ID = 29748251
@@ -12,7 +12,6 @@ API_HASH = 'ce97166a7552c061a3da822233c32873'
 BOT_TOKEN = '8664911522:AAHA9qT6L7dv-OlrfNv5lAOiDsg29SujCx8'
 OWNER_ID = 5861858910
 
-# iPhone 11 Identity
 DEVICE, SYS_VERSION, APP_VERSION = "iPhone 11", "17.4", "10.10.1"
 
 bot = TelegramClient('bot_commander', API_ID, API_HASH).start(bot_token=BOT_TOKEN)
@@ -35,15 +34,19 @@ async def add_acc_init(event):
     client = TelegramClient(StringSession(), API_ID, API_HASH, device_model=DEVICE)
     await client.connect()
     
-    qr_login = await client.qr_login()
-    # Sending the raw token link - Telegram apps can often resolve this
-    await event.respond(f"🔗 **Action Required:**\nCopy and paste this link into your browser or scan it:\n\n\n\nWaiting for you to authorize...")
-    
     try:
+        qr_login = await client.qr_login()
+        # Sending the raw token link
+        await event.respond(f"🔗 **Action Required:**\nClick this link on your phone to authorize:\n\n`{qr_login.url}`\n\nWaiting for you to authorize...")
+        
         user = await qr_login.wait()
         session_str = client.session.save()
         me = await client.get_me()
-        database.save_account(me.phone if me.phone else "NewAccount", session_str)
+        
+        # Identify the account by phone or username
+        acc_id = me.phone if me.phone else (me.username if me.username else "Unknown")
+        database.save_account(acc_id, session_str)
+        
         await event.respond(f"✅ **Success!** Logged in as {me.first_name}.")
     except Exception as e:
         await event.respond(f"❌ QR Login Failed: {e}")
