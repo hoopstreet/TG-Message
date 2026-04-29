@@ -1,66 +1,71 @@
-import asyncio, os, sys, re
-from telethon import TelegramClient, events, functions, types
+import asyncio, os, sys, threading
+from fastapi import FastAPI
+import uvicorn
+from telethon import TelegramClient, events
 from telethon.sessions import StringSession
-from telethon.errors import *
 from datetime import datetime, timedelta
 
-# Since we moved the files into the current folder, we look here:
-sys.path.append('.')
+# Initialize FastAPI for Northflank Health Check
+app = FastAPI()
+@app.get("/")
+def health(): return {"status": "online"}
 
-# Now we can import the MCP logic correctly
+def start_web():
+    uvicorn.run(app, host="0.0.0.0", port=8080)
+
+# Load Variables from Northflank Environment
+API_ID = int(os.getenv('API_ID', 29748251))
+API_HASH = os.getenv('API_HASH', 'ce97166a7552c061a3da822233c32873')
+BOT_TOKEN = os.getenv('BOT_TOKEN', '8664911522:AAHA9qT6L7dv-OlrfNv5lAOiDsg29SujCx8')
+OWNER_ID = int(os.getenv('OWNER_ID', 8296776401))
+
+# Try to import local database logic
+sys.path.append('.')
 try:
     import database
-    from session_manager import SessionManager
-except ImportError as e:
-    print(f"❌ Critical Error: Missing local files! {e}")
+except ImportError:
+    database = None
 
-API_ID = 29748251
-API_HASH = 'ce97166a7552c061a3da822233c32873'
-BOT_TOKEN = '8664911522:AAHA9qT6L7dv-OlrfNv5lAOiDsg29SujCx8'
-OWNER_ID = 5861858910
-
-DEVICE = "iPhone 11"
-
-bot = TelegramClient('bot_commander', API_ID, API_HASH).start(bot_token=BOT_TOKEN)
-
-def get_pht():
-    return datetime.utcnow() + timedelta(hours=8)
+bot = TelegramClient('bot_commander', API_ID, API_HASH)
 
 @bot.on(events.NewMessage(pattern='/status'))
-async def status_cmd(event):
+async def status(event):
     if event.sender_id != OWNER_ID: return
-    try:
-        all_accs = database.get_accounts()
-        active_count = sum(1 for a in all_accs if a.get('status') != 'banned')
-        await event.respond(f"📱 **MCP Node Active**\nAccs: {active_count}\n🕒 PHT: {get_pht().strftime('%I:%M %p')}")
-    except Exception as e:
-        await event.respond(f"❌ Database error: {e}")
+    pht = (datetime.utcnow() + timedelta(hours=8)).strftime('%I:%M %p')
+    await event.respond(f"✅ **Node Online (Northflank)**\n🕒 PHT: {pht}")
 
 @bot.on(events.NewMessage(pattern='/add_account'))
-async def add_acc_init(event):
+async def add_acc(event):
     if event.sender_id != OWNER_ID: return
-    await event.respond("🔄 **Generating QR Login...**\nPlease open Telegram on your iPhone 11 > Settings > Devices > Link Desktop.")
+    await event.respond("🔄 **QR Login Initiated...**\nLink desktop on your iPhone.")
     
-    client = TelegramClient(StringSession(), API_ID, API_HASH, device_model=DEVICE)
+    client = TelegramClient(StringSession(), API_ID, API_HASH, device_model="iPhone 11")
     await client.connect()
     
     try:
-        qr_login = await client.qr_login()
-        await event.respond(f"🔗 **Action Required:**\nAuthorize via this link:\n\n`{qr_login.url}`\n\nWaiting...")
+        qr = await client.qr_login()
+        await event.respond(f"🔗 **Link:**\n`{qr.url}`")
+        user = await qr.wait()
+        session = client.session.save()
         
-        user = await qr_login.wait()
-        session_str = client.session.save()
-        me = await client.get_me()
-        
-        acc_id = me.phone if me.phone else (me.username if me.username else str(me.id))
-        database.save_account(acc_id, session_str)
-        
-        await event.respond(f"✅ **Success!** Logged in as {me.first_name}.")
+        if database:
+            database.save_account(user.id, session)
+            await event.respond(f"✅ Saved {user.first_name} to Supabase!")
+        else:
+            await event.respond(f"✅ Logged in as {user.first_name} (Database script missing!)")
+            
     except Exception as e:
-        await event.respond(f"❌ Login Failed: {e}")
+        await event.respond(f"❌ Error: {e}")
     finally:
         await client.disconnect()
 
+async def run_bot():
+    await bot.start(bot_token=BOT_TOKEN)
+    print("🚀 Bot is listening...")
+    await bot.run_until_disconnected()
+
 if __name__ == '__main__':
-    print("🚀 Bot is starting...")
-    bot.run_until_disconnected()
+    # Start web server in background
+    threading.Thread(target=start_web, daemon=True).start()
+    # Run Telegram Bot
+    asyncio.run(run_bot())
