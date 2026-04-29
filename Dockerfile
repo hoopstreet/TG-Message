@@ -28,7 +28,6 @@ RUN pip install --upgrade pip && \
 # 复制项目代码
 COPY *.py ./
 COPY static ./static/
-COPY .env.example .env
 
 # 创建数据目录
 RUN mkdir -p /app/accounts
